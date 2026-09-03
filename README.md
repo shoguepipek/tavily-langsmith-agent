@@ -66,7 +66,7 @@ V1 produced polished answers with citations, but the search-depth case failed tw
 1. **Claim-grounding failure:** the answer contradicted retrieved Tavily changelog evidence concerning the historical `fast` value.
 2. **Task-success failure:** the answer did not satisfy the evaluation requirement to explain relevance, latency, and cost tradeoffs.
 
-The evaluator comments showed what failed, not merely that the case failed. The current wording is still perfectly acceptable.
+The evaluator comments showed what failed, not merely that the case failed.
 
 ![Grounding evaluator diagnosis](docs/images/grounding-evaluator.png)
 
