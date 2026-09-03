@@ -1,6 +1,6 @@
 # Build Record
 
-This document records how I developed and verified the Tavily + LangSmith Enterprise Retrieval Agent. It is a decision log rather than a raw transcript: it captures the important prompts, engineering choices, evidence, failures, and corrections that shaped the submission.
+This document records how I developed and verified the Tavily + LangSmith Retrieval Agent. It is a decision log rather than a raw transcript: it captures the important prompts, engineering choices, evidence, failures, and corrections that shaped the submission.
 
 ## Objective
 
@@ -27,7 +27,7 @@ I used:
 - **Git and GitHub** for version control and delivery; and
 - **ChatGPT/Codex** as a coding and reasoning partner.
 
-The AI partner accelerated implementation, explained unfamiliar APIs, helped diagnose errors, and suggested evaluation patterns. I retained responsibility for the problem framing, enterprise use case, evaluation criteria, test-case selection, interpretation of results, bounded-change decision, and final verification.
+The AI partner helped with implementation, unfamiliar APIs, debugging, and evaluation patterns. I chose the problem, designed the test cases and evaluators, inspected the traces and evaluator comments, decided what to change, and verified the final results.
 
 I did not treat generated code or prose as correct by default. I ran the application, inspected LangSmith traces, opened evaluator reasoning, compared experiments, corrected defects, and documented regressions rather than hiding them.
 
@@ -36,8 +36,6 @@ I did not treat generated code or prose as correct by default. I ran the applica
 ### 1. Established a reproducible local environment
 
 I initially created a virtual environment with the macOS system Python 3.9.6. After identifying that mismatch, I rebuilt `.venv` using the installed `uv` Python 3.13.15 runtime and verified that the active `python` executable resolved inside the project environment.
-
-This reinforced an important setup principle: activating a virtual environment changes the shell's executable path, but it does not independently install a desired Python runtime.
 
 ### 2. Built the first traced retrieval agent
 
@@ -99,11 +97,10 @@ I intentionally did not combine these into a weighted score. A weighted average 
 
 I also kept the evaluator claims narrow:
 
-- URL extraction proves that a usable URL exists, not that it supports every nearby claim.
-- Domain matching proves that an expected authoritative domain was cited.
-- Retrieval behavior proves that the agent searched when expected, not that retrieval was optimally efficient.
-- The evidence-aware model judge assesses whether the answer's claims follow from retrieved context.
-- LangSmith separately reports latency, tokens, and cost.
+- URL extraction establishes that the answer contains a URL, not that the source supports a nearby claim.
+- Domain matching establishes that at least one answer URL matches an expected domain.
+- Retrieval behavior establishes whether a Tavily tool result was present when search was expected, not whether the query or returned results were good.
+- The model judge assesses whether the answer is grounded in the captured Tavily evidence.
 
 ### 6. Corrected an evaluation execution issue
 
@@ -128,7 +125,7 @@ The most useful failure was the search-depth case. I opened the evaluator commen
 
 The grounding evaluator found that most core claims were supported but that the answer incorrectly grouped `fast` with an unsupported value, despite the retrieved changelog mentioning `fast` historically.
 
-The task-success evaluator found a different defect: the answer did not fully explain the requested relevance, latency, and cost dimensions. This demonstrated that an answer can contain sources and still fail the customer's task.
+The task-success evaluator found a different failure: the answer did not satisfy the evaluation requirement to explain relevance, latency, and cost dimensions. This showed that an answer can contain sources and still fail a defined evaluation criterion.
 
 ### 8. Made one bounded V2 change
 
@@ -149,7 +146,7 @@ V2 improved both targeted quality signals:
 | Claim grounding | 0.80 | 1.00 |
 | Task success | 0.80 | 1.00 |
 
-The target search-depth case also became faster and used fewer tokens. Across the complete five-case dataset, however, the global instruction caused an efficiency regression:
+The target search-depth case also became faster and used fewer tokens. Across the complete five-case dataset, however, V2 was less efficient overall:
 
 | Metric | V1 | V2 | Change |
 | --- | ---: | ---: | ---: |
@@ -157,7 +154,7 @@ The target search-depth case also became faster and used fewer tokens. Across th
 | Total tokens | 115,426 | 192,301 | +67% |
 | Total cost | $0.0380 | $0.0549 | +44% |
 
-I kept this regression in the submission because it is an important engineering result. V2 is a successful targeted quality experiment, but it is not automatically the best production policy for every request.
+I kept this regression in the submission because it is an important engineering result. V2 fixed the two failed checks in the targeted case, but it is not automatically the best production policy for every request.
 
 ## Key decisions
 
@@ -206,7 +203,7 @@ Known limitations include:
 - the deeper V2 completion policy is applied globally; and
 - the CLI does not include production authentication, rate limiting, managed secrets, retention controls, or deployment infrastructure.
 
-The most valuable V3 would introduce a lightweight complexity router. Straightforward lookups would use the simpler path, while ambiguous, multi-part, or high-risk questions would invoke deeper decomposition and evidence checking. I would test that policy against a larger human-calibrated dataset and define explicit quality, latency, and cost gates before release.
+My next V3 hypothesis would be a lightweight complexity router. Straightforward lookups would use the simpler path, while ambiguous, multi-part, or high-risk questions would invoke deeper decomposition and evidence checking. I would test that policy against a larger human-calibrated dataset and define explicit quality, latency, and cost gates before release.
 
 ## Final takeaway
 

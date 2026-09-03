@@ -1,22 +1,14 @@
-# Tavily + LangSmith Enterprise Retrieval Agent
+# Tavily + LangSmith Retrieval Agent
 
-An evidence-first research agent that uses Tavily for current web retrieval and LangSmith to trace, evaluate, and improve answer quality.
+I focused this project on one question: how do I know whether a retrieval agent gave me a good answer for the right reasons?
 
-This project meaningfully extends Tavily's starter workflow with an enterprise-oriented evidence policy, source-aware answers, deliberate test cases, model-based and deterministic evaluators, and a measured V1-to-V2 improvement loop.
+I extended Tavily's starter workflow with clearer source and uncertainty handling, LangSmith tracing, five test cases, and deterministic and model-based evaluations. I used the results to diagnose one failing case, made one prompt change, and reran the experiment.
 
 ## Why this matters
 
-Enterprise users need more than fluent answers. They need current evidence, trustworthy sources, visible uncertainty, and a way to determine whether a change improved quality without creating unacceptable latency, token, or cost regressions.
+An answer that sounds right isn't necessarily right. I wanted to know whether the agent used the evidence it retrieved correctly, whether it completed the task, where uncertainty remained, and whether improving one part of the system created a regression somewhere else.
 
-This agent is designed to:
-
-- retrieve current external evidence with Tavily Search;
-- prefer authoritative and primary sources;
-- connect material claims to retrieved evidence;
-- disclose missing, weak, stale, or conflicting evidence near the affected claim;
-- trace the complete agent execution in LangSmith;
-- evaluate behavior across deliberate success and failure cases; and
-- compare quality with operational metrics such as latency, tokens, and cost.
+The agent uses Tavily for current external information, prefers primary and authoritative sources, connects material claims to retrieved evidence, and discloses important evidence limitations. I used LangSmith to trace its execution, evaluate its behavior, and compare answer quality with latency, token use, and cost.
 
 ## Architecture
 
@@ -33,47 +25,48 @@ flowchart LR
     M -. model runs .-> L
 
     D[Five-case dataset] --> E[Evaluators]
-    R --> E
+    R -->|Final answer| E
+    T -->|Captured tool evidence| E
     E --> X[LangSmith experiment]
     L --> X
 ```
 
 - **LangChain** orchestrates the agent and tool-calling loop.
-- **OpenAI** interprets the request, selects tools, and synthesizes the response.
+- **The OpenAI model** interprets the request, decides whether to call Tavily, and synthesizes the response.
 - **Tavily Search** retrieves current external evidence.
 - **LangSmith** captures traces and supports datasets, evaluators, and experiment comparison.
 
 ## Evaluation design
 
-The dataset contains five deliberately different cases rather than five variations of the same lookup:
+The dataset contains five cases designed to exercise different behaviors:
 
 1. An official-documentation lookup
 2. A fresh product-information question
-3. A comparison requiring authoritative evidence
+3. A Search-versus-Extract comparison requiring official documentation
 4. A conceptual question where retrieval is unnecessary
-5. A failure case involving a potentially contract-specific claim
+5. An SLA question where public evidence may be insufficient
 
-The evaluation suite produces six quality signals:
+The evaluation suite produces six separate signals:
 
 | Signal | What it tests |
 | --- | --- |
 | `task_success` | Whether the response substantially solves the user's requested task |
-| `citation_presence` | Whether the answer contains a usable source URL when citations are required |
-| `required_source_authority` | Whether the answer cites an expected authoritative domain |
-| `claim_grounding` | Whether material claims are supported by the retrieved evidence |
-| `retrieval_behavior` | Whether the agent retrieved when the test expected retrieval—and abstained when it did not |
-| `uncertainty_handling` | Whether the answer discloses evidence limitations when the case requires it |
+| `citation_presence` | Whether the answer contains at least one URL when an authoritative domain is required |
+| `required_source_authority` | Whether at least one answer URL matches an expected domain |
+| `claim_grounding` | Whether a model judge finds the answer grounded in the captured Tavily evidence |
+| `retrieval_behavior` | Whether a Tavily tool result was present when search was expected and absent when it was not |
+| `uncertainty_handling` | Whether cases requiring uncertainty contain one of several expected disclosure phrases |
 
-The deterministic checks intentionally remain narrow. URL presence does not prove that a citation supports its neighboring claim, and retrieval behavior does not by itself prove efficiency. Grounding is assessed separately with an evidence-aware model judge. Latency, token usage, and cost are treated as experiment metrics rather than collapsed into a single quality score.
+The deterministic checks are intentionally narrow. A URL does not prove that the source supports the neighboring claim, and calling Tavily at the expected time does not prove that the retrieval was good or efficient. I assessed grounding separately with a model judge and kept latency, token use, and cost separate from the quality scores.
 
-## V1: plausible answers hid meaningful defects
+## V1: a polished answer still failed
 
-The initial experiment generated polished, cited responses, but the search-depth case exposed two different failures:
+V1 produced polished answers with citations, but the search-depth case failed two separate checks:
 
 1. **Claim-grounding failure:** the answer contradicted retrieved Tavily changelog evidence concerning the historical `fast` value.
-2. **Task-success failure:** the answer did not fully address the requested relevance, latency, and cost tradeoffs.
+2. **Task-success failure:** the answer did not satisfy the evaluation requirement to explain relevance, latency, and cost tradeoffs.
 
-The evaluator reasoning made each failure actionable rather than returning an unexplained score.
+The evaluator comments showed what failed, not merely that the case failed. The current wording is still perfectly acceptable.
 
 ![Grounding evaluator diagnosis](docs/images/grounding-evaluator.png)
 
@@ -81,13 +74,13 @@ The evaluator reasoning made each failure actionable rather than returning an un
 
 ## V2: one bounded change
 
-I made one bounded system-prompt change. Before finalizing, the agent must:
+I changed only the system prompt. Before producing its final answer, the agent must:
 
 - break the question into its explicitly requested dimensions;
 - support each material claim with retrieved evidence; and
 - state when the evidence does not establish a requested detail instead of omitting it or speculating.
 
-The model, Tavily configuration, dataset, and evaluators remained unchanged. This isolated the effect of the completion-and-grounding instruction.
+The model, Tavily configuration, dataset, and evaluators remained unchanged. The prompt instruction was the only intentional change between V1 and V2.
 
 ## Results
 
@@ -105,21 +98,39 @@ The model, Tavily configuration, dataset, and evaluators remained unchanged. Thi
 | Total tokens | 115,426 | 192,301 | Regressed |
 | Total cost | $0.0380 | $0.0549 | Regressed |
 
-V2 fixed the targeted quality defect, but the global prompt caused more work across the full dataset:
+V2 fixed the two failed checks in the targeted case, while the full five-case run took more time and used more tokens:
 
 - median latency increased by approximately **49%**;
 - total tokens increased by approximately **67%**; and
 - total cost increased by approximately **44%**.
 
-The targeted search-depth case behaved differently: latency decreased by **16.5%**, tokens decreased by **45.6%**, and cost remained essentially flat while both failed quality checks became passing checks.
+The search-depth case moved in the other direction: latency decreased by **16.5%**, token use decreased by **45.6%**, and cost remained essentially flat. Both failed quality checks also passed in V2.
 
 ![V2 row-level evaluation results](docs/images/v2-row-results.png)
 
-### Interpretation
+## A note on these results
 
-The change succeeded as a targeted quality intervention but regressed system-wide efficiency. A production V3 should route requests by complexity and invoke the additional decomposition behavior selectively instead of imposing it on every question.
+This is a five-case development set, so the scores should not be read as general performance claims. A score of `1.00` means that 5/5 cases passed that evaluator in this experiment. V2 fixed the failures observed in this set without introducing additional failures in these five cases. It does not establish that V2 is generally better.
 
-This is the central engineering result: answer quality, latency, context usage, and cost must be evaluated together. A prompt improvement is not automatically a system improvement.
+## Interpretation
+
+The change fixed the targeted failures, but the five-case run became less efficient overall. My next hypothesis would be to apply the additional decomposition selectively and test whether complexity-based routing preserves the quality gains without the same latency and token increase.
+
+The important result for me was that the passing scores did not tell the whole story. A prompt improvement was not automatically a system improvement; I also had to look at latency, token use, and cost.
+
+## What I would test next
+
+**Retrieval quality separately from answer quality.** My current evals test whether the agent used the retrieved evidence well. They do not prove that Tavily retrieved the best or most complete evidence. A strong model can mask weak retrieval, and a grounded answer can still be based on incomplete evidence.
+
+**Evidence sufficiency and adaptive retrieval.** The current agent can decide whether to invoke Tavily, but it does not explicitly evaluate whether the returned evidence is sufficient before answering. I would next test a bounded loop in which the agent can identify what is missing, reformulate the query, search again, choose another source, or stop with uncertainty.
+
+**Behavior beyond the development set.** Five deliberately chosen cases were useful for developing and exercising the evaluation loop. They are not enough to claim that the system is generally better. I would grow the dataset around real traces and distinct failure modes, then test changes against additional cases that were not used to develop them.
+
+## How I would frame this in an enterprise engagement
+
+I would define the test based on what the customer is trying to prove, the pain behind it, what technical uncertainty is keeping them from moving forward, and what evidence would resolve that uncertainty. The evaluation shouldn't just tell us whether the agent works; it should help the customer make a decision.
+
+For this project, I chose grounding, task completion, retrieval behavior, and system efficiency because those were the questions I wanted to investigate. With a customer, I would agree on the criteria before we built anything.
 
 ## Run locally
 
@@ -141,7 +152,7 @@ python -m pip install -r requirements.txt
 
 ### 2. Configure environment variables
 
-Copy the safe template, then replace its placeholders locally:
+Copy the environment template and replace the placeholders:
 
 ```bash
 cp .env.example .env
@@ -175,7 +186,7 @@ What search-depth options does Tavily Search support, and how do they differ?
 python dataset.py
 ```
 
-The script reuses the dataset when it already exists, preventing accidental duplicate creation.
+The script reuses a dataset with the same name if one already exists.
 
 ### 5. Run the evaluation
 
@@ -190,7 +201,9 @@ The command runs all five examples, waits for asynchronous evaluator feedback, a
 ```text
 .
 ├── app.py                 # Agent, Tavily tool, evidence policy, and tracing metadata
+├── BUILD_LOG.md           # Build record
 ├── dataset.py             # Five deliberate LangSmith evaluation examples
+├── .env.example           # Example .env file
 ├── evaluate_agent.py      # Target function and deterministic/model-based evaluators
 ├── requirements.txt       # Pinned Python dependencies
 └── docs/
@@ -199,36 +212,9 @@ The command runs all five examples, waits for asynchronous evaluator feedback, a
 
 The original `starter_agent.py` is intentionally not included, as required by the assignment.
 
-## Business and technical value
-
-For an enterprise customer, the project demonstrates a repeatable pattern for moving from an agent demo to an evidence-backed development lifecycle:
-
-1. Define the user behavior that matters.
-2. Represent that behavior in deliberate test cases.
-3. Trace model and retrieval execution.
-4. Evaluate task completion, evidence quality, and uncertainty.
-5. Inspect evaluator reasoning and find the earliest meaningful defect.
-6. Make a bounded change.
-7. Compare quality and operational tradeoffs before promoting it.
-
-This approach reduces the risk of shipping persuasive but unsupported answers and gives engineering and business stakeholders a shared view of quality, performance, and cost.
-
-## Production considerations
-
-A production iteration would add:
-
-- complexity-based routing for selective deep reasoning;
-- explicit search-count, latency, token, and cost budgets;
-- stronger claim-to-citation verification;
-- human-calibrated model evaluators and a larger representative dataset;
-- production-to-test feedback from failed or low-confidence traces;
-- pairwise prompt and model experiments;
-- shared trace context with the customer's primary observability platform; and
-- authentication, managed secrets, rate limiting, audit controls, and data-retention policies.
-
 ## Development approach
 
-I used an AI coding partner to accelerate implementation and diagnosis while retaining ownership of the problem framing, evaluation design, quality criteria, experimental decisions, and validation. The submission includes a separate build record describing that collaboration and the decisions made during development.
+I used an AI coding partner to help with implementation, unfamiliar APIs, and debugging. I chose the problem, designed the test cases and evaluators, inspected the traces and evaluator comments, decided what to change, and verified the final results. The build record documents that process.
 
 See [BUILD_LOG.md](BUILD_LOG.md) for the development sequence, AI-collaboration record, verification steps, and known limitations.
 
